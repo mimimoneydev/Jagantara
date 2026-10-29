@@ -5,7 +5,7 @@ import { baseDemoResult, demoInput, demoProfiles, demoSampleOrder, demoSamples, 
 import { claimCheck } from "../lib/evidence";
 import { retrieveHistoricalSources } from "../lib/history";
 import { parseJourneyInput } from "../lib/input";
-import { extractEntities, getQlooDiscoveries, QlooError, resolveQlooInterests } from "../lib/qloo";
+import { extractEntities, extractTags, getQlooDiscoveries, QlooError, resolveQlooInterests } from "../lib/qloo";
 import { composeWithOpenRouter, describeMediaWithOpenRouter } from "../lib/openrouter";
 
 const originalFetch = globalThis.fetch;
@@ -130,6 +130,20 @@ test("Qloo parser accepts documented and defensive response shapes", () => {
   assert.deepEqual(extractEntities({ success: true, results: { entities: [] } }), []);
 });
 
+test("Qloo tag parser and ambiguity gate reject an unresolved cultural concept", async () => {
+  assert.equal(extractTags({ results: { tags: [{ tag_id: "tag-1" }] } })[0].tag_id, "tag-1");
+  globalThis.fetch = async () => Response.json({ results: [
+    { tag_id: "ireland", name: "Folk music of Ireland" },
+    { tag_id: "italy", name: "Folk music of Italy" },
+  ] });
+  assert.deepEqual(await resolveQlooInterests(["folk music"]), []);
+});
+
+test("seeded named entities must match their expected Qloo type", async () => {
+  globalThis.fetch = async () => Response.json({ results: [{ entity_id: "wrong", name: "Joy Harjo", subtype: "urn:entity:artist" }] });
+  assert.deepEqual(await resolveQlooInterests(["Joy Harjo"]), []);
+});
+
 test("Qloo requests follow the hackathon authentication and URL contract", async () => {
   let requestUrl: URL | undefined;
   let requestInit: RequestInit | undefined;
@@ -180,6 +194,19 @@ test("Qloo Insights uses documented entity signals and explainability for every 
     assert.equal(url.searchParams.get("take"), "3");
     assert.equal(init?.method, "GET");
   }
+});
+
+test("Qloo Insights preserves successful categories when one category fails", async () => {
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    const type = url.searchParams.get("filter.type");
+    if (type === "urn:entity:book") return new Response("temporary", { status: 503 });
+    return Response.json({ results: { entities: [{ entity_id: `ok-${type}`, name: `Result ${type}` }] } });
+  };
+  const response = await getQlooDiscoveries([{ id: "verified", name: "Afrigo Band", type: "urn:entity:artist", signalKind: "entity", verified: true }]);
+  assert.equal(response.discoveries.length, 3);
+  assert.equal(response.state.status, "live");
+  assert.match(response.state.message, /3 of 4/);
 });
 
 test("Qloo rejects a non-hackathon base URL before sending a credential", async () => {
