@@ -52,5 +52,6 @@ export function sourcesAsConservativeTimeline(sources: HistoricalSource[]): Evid
     evidenceType: "SOURCE_BACKED_HISTORY",
     sourceUrl: source.url,
     sourceTitle: source.title,
+    supportingExcerpt: source.extract,
   }));
 }

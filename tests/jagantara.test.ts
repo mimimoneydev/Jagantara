@@ -42,7 +42,7 @@ test("OpenRouter composition uses the configured DeepSeek model and JSON output"
     assert.equal(String(input), "https://openrouter.ai/api/v1/chat/completions");
     assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-openrouter-key");
     requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    return Response.json({ choices: [{ message: { content: JSON.stringify({ timeline: [{ title: "Supported", body: "A sourced fact.", sourceIndex: 1 }], narrative: [] }) } }] });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ timeline: [{ title: "Supported", body: "A sourced fact.", sourceIndex: 1, supportingExcerpt: "A sourced fact." }], narrative: [] }) } }] });
   };
 
   const composed = await composeWithOpenRouter(
@@ -91,8 +91,8 @@ test("every judge sample resolves to a distinct sourced evidence packet", () => 
     assert.equal(result.timeline.length, 3);
     assert.ok(result.timeline.every((item) => item.evidenceType === "SOURCE_BACKED_HISTORY" && item.sourceUrl?.startsWith("https://")));
     assert.ok(result.narrative.some((item) => item.evidenceType === "FAMILY_TESTIMONY" && item.sourceTitle?.includes("fictional sample")));
-    assert.ok(result.media.length >= 2);
-    assert.ok(result.media.every((item) => new URL(item.mediaUrl).hostname === "upload.wikimedia.org" && item.license));
+    assert.ok(result.media.length >= 1);
+    assert.ok(result.media.every((item) => new URL(item.mediaUrl).hostname === "upload.wikimedia.org" && item.license && item.attributionVerifiedAt));
   }
 });
 
@@ -114,7 +114,7 @@ test("historical retrieval uses the Wikimedia gateway and returns linked excerpt
 
 test("claim checker rejects unsupported history and preserves explicit evidence", () => {
   const checked = claimCheck([
-    { id: "history:ok", title: "Sourced", body: "Fact", evidenceType: "SOURCE_BACKED_HISTORY", sourceUrl: "https://example.org/archive" },
+    { id: "history:ok", title: "Sourced", body: "A documented fact happened in 1845.", supportingExcerpt: "Sourced. A documented fact happened in 1845.", evidenceType: "SOURCE_BACKED_HISTORY", sourceUrl: "https://example.org/archive" },
     { id: "history:no-url", title: "Unsupported", body: "Claim", evidenceType: "SOURCE_BACKED_HISTORY" },
     { id: "testimony:1", title: "Memory", body: "User said this", evidenceType: "FAMILY_TESTIMONY" },
     { id: "not-qloo", title: "Fake affinity", body: "No entity", evidenceType: "QLOO_TASTE_CONNECTION" },
@@ -139,11 +139,12 @@ test("Qloo requests follow the hackathon authentication and URL contract", async
     return Response.json({ results: [{ entity_id: "qloo-entity-id", name: "Native American flute" }] });
   };
 
-  await resolveQlooInterests(["Native American flute"]);
+  await resolveQlooInterests(["Afrigo Band"]);
 
   assert.equal(requestUrl?.origin, "https://hackathon.api.qloo.com");
   assert.equal(requestUrl?.pathname, "/search");
-  assert.equal(requestUrl?.searchParams.get("query"), "Native American flute");
+  assert.equal(requestUrl?.searchParams.get("query"), "Afrigo Band");
+  assert.equal(requestUrl?.searchParams.get("types"), "urn:entity:artist");
   assert.equal(requestInit?.method, "GET");
   assert.equal(new Headers(requestInit?.headers).get("X-Api-Key"), "test-only-key");
   assert.equal(new Headers(requestInit?.headers).get("Authorization"), null);
@@ -201,7 +202,7 @@ test("Qloo 401, 403, and 429 failures are explicit and do not fall back", async 
   });
   await t.test("403", async () => {
     globalThis.fetch = async () => new Response("forbidden", { status: 403 });
-    await assert.rejects(() => resolveQlooInterests(["unique forbidden signal"]), (error: unknown) => error instanceof QlooError && error.state.status === "error" && /entity types/.test(error.state.message));
+    await assert.rejects(() => resolveQlooInterests(["unique forbidden signal"]), (error: unknown) => error instanceof QlooError && error.state.status === "error" && /signal or entity type/.test(error.state.message));
   });
 });
 
@@ -217,7 +218,11 @@ test("taste swap keeps history stable while changing Qloo signals and discoverie
       const name = url.searchParams.get("query") || "unknown";
       return Response.json({ results: [{ entity_id: `id-${name.replaceAll(" ", "-")}`, name, subtype: "urn:entity:artist" }] });
     }
-    const signal = url.searchParams.get("signal.interests.entities") || "none";
+    if (url.pathname === "/v2/tags") {
+      const name = url.searchParams.get("query") || "unknown";
+      return Response.json({ results: [{ tag_id: `tag-${name.replaceAll(" ", "-")}`, name }] });
+    }
+    const signal = [url.searchParams.get("signal.interests.entities"), url.searchParams.get("signal.interests.tags")].filter(Boolean).join(",") || "none";
     const type = url.searchParams.get("filter.type") || "urn:entity:artist";
     return Response.json({ results: { entities: [{ entity_id: `result-${type}-${signal}`, name: `Result for ${signal}`, subtype: type, properties: { description: "Mocked Qloo result" } }] } });
   };

@@ -7,6 +7,10 @@ import type { AgentTrace, JourneyInput, JourneyResult } from "./types";
 
 export async function runHeritageAgent(input: JourneyInput): Promise<JourneyResult> {
   const trace: AgentTrace[] = [{ tool: "parse_input", status: "complete", detail: `Validated place, period, personal connection, memory attribution, and ${input.interests.length} interests.` }];
+  const qlooPromise = withDeadline((async () => {
+    const resolved = await resolveQlooInterests(input.interests);
+    return { resolved, ...(await getQlooDiscoveries(resolved)) };
+  })(), 22_000);
   let result: JourneyResult;
   let mediaDescriptionPromise: ReturnType<typeof describeMediaWithOpenRouter> | undefined;
 
@@ -30,6 +34,7 @@ export async function runHeritageAgent(input: JourneyInput): Promise<JourneyResu
       timeline,
       narrative,
       discoveries: [],
+      culturalRoute: null,
       media: [],
       resolvedInterests: [],
       qloo: { status: "unconfigured", message: "Qloo has not run yet." },
@@ -40,13 +45,12 @@ export async function runHeritageAgent(input: JourneyInput): Promise<JourneyResu
   }
 
   try {
-    const resolved = await resolveQlooInterests(input.interests);
-    result.resolvedInterests = resolved;
-    trace.push({ tool: "qloo_entity_resolution", status: resolved.length ? "complete" : "failed", detail: resolved.length ? `Saved ${resolved.length} Qloo entity IDs.` : "Qloo found no matching entities." });
-    const qloo = await getQlooDiscoveries(resolved);
+    const qloo = await qlooPromise;
+    result.resolvedInterests = qloo.resolved;
     result.discoveries = qloo.discoveries;
     result.qloo = qloo.state;
-    trace.push({ tool: "qloo_insights", status: qloo.discoveries.length ? "complete" : "failed", detail: qloo.discoveries.length ? `Received ${qloo.discoveries.length} live discoveries across four categories with explainability requested.` : qloo.state.message });
+    trace.push({ tool: "qloo_entity_resolution", status: qloo.resolved.length ? "complete" : "failed", detail: qloo.resolved.length ? `Verified ${qloo.resolved.length} typed Qloo entity/tag signals; ambiguous candidates were rejected.` : "No Qloo signal passed verification." });
+    trace.push({ tool: "qloo_insights", status: qloo.discoveries.length ? "complete" : "failed", detail: qloo.discoveries.length ? `Built the primary cultural route from ${qloo.discoveries.length} live, explainable Qloo discoveries.` : qloo.state.message });
   } catch (error) {
     result.qloo = error instanceof QlooError ? error.state : { status: "error", message: "Qloo failed unexpectedly. No substitute results were used." };
     trace.push({ tool: "qloo_entity_resolution", status: "failed", detail: result.qloo.message });
@@ -63,7 +67,27 @@ export async function runHeritageAgent(input: JourneyInput): Promise<JourneyResu
   const checkedDiscoveries = claimCheck(result.discoveries);
   result.timeline = checkedTimeline.accepted;
   result.discoveries = checkedDiscoveries.accepted as typeof result.discoveries;
-  trace.push({ tool: "claim_check", status: "complete", detail: `Accepted ${checkedTimeline.accepted.length} sourced historical items and ${checkedDiscoveries.accepted.length} Qloo-labeled items; rejected ${checkedTimeline.rejected.length + checkedDiscoveries.rejected.length}.` });
+  result.culturalRoute = result.discoveries.length ? {
+    title: `A Qloo cultural route through ${result.location.name}`,
+    summary: "This is the primary deliverable: a cross-media route generated from verified Qloo entities and tags. History anchors context; Qloo determines every route stop.",
+    stops: ["music", "books", "film", "destinations"].flatMap((category) => result.discoveries.find((item) => item.category === category) || []),
+    completeCategories: [...new Set(result.discoveries.map((item) => item.category))],
+  } : null;
+  trace.push({ tool: "claim_check", status: "complete", detail: `Accepted ${checkedTimeline.accepted.length} source-entailed historical items and ${checkedDiscoveries.accepted.length} Qloo-labeled items; rejected ${checkedTimeline.rejected.length + checkedDiscoveries.rejected.length}.` });
   result.agentTrace = trace;
   return result;
+}
+
+async function withDeadline<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new QlooError("Judge-path deadline exceeded.", { status: "timeout", message: "Qloo exceeded the 22-second end-to-end budget; no recommendations were fabricated." })), milliseconds);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

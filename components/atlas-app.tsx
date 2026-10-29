@@ -71,8 +71,13 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
   }
 
   function swapTaste(nextProfile: "rhythm" | "page") {
-    const sample = getDemoSample(result.input.place) || demoSamples.nativeAmerican;
-    const next = { ...sample.input, interests: [...sample.profiles[nextProfile]], tasteProfile: nextProfile };
+    const sample = getDemoSample(result.input.place);
+    const interests = sample
+      ? [...sample.profiles[nextProfile]]
+      : nextProfile === "rhythm"
+        ? [...result.input.interests.slice(0, 2), "music traditions"].slice(0, 3)
+        : [...result.input.interests.slice(0, 1), "literature", "documentary film"].slice(0, 3);
+    const next = { ...result.input, interests, tasteProfile: nextProfile, demo: Boolean(sample) };
     setForm(next);
     setInterestText(next.interests.join(", "));
     void runJourney(next);
@@ -149,6 +154,7 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
               <div className="taste-switch" aria-label="Taste profile"><span>Taste lens</span><button className={profile === "rhythm" ? "active" : ""} onClick={() => swapTaste("rhythm")} disabled={loading}>Rhythm</button><button className={profile === "page" ? "active" : ""} onClick={() => swapTaste("page")} disabled={loading}>Page & screen</button></div>
             </div>
             <p className="stable-note"><Info size={15}/><strong>The timeline stays fixed.</strong> Only Qloo discoveries change when you swap taste.</p>
+            {result.culturalRoute && <article className="route-card" aria-label="Qloo cultural route"><p className="section-kicker">Primary Qloo deliverable</p><h3>{result.culturalRoute.title}</h3><p>{result.culturalRoute.summary}</p><ol>{result.culturalRoute.stops.map((stop) => <li key={stop.id}><span>{stop.category}</span><strong>{stop.title}</strong></li>)}</ol></article>}
             {result.discoveries.length ? <div className="discovery-grid">{(["music", "books", "film", "destinations"] as const).map((category) => <DiscoveryColumn key={category} category={category} items={grouped[category] || []} onSelect={setSelected}/>)}</div> : <div className="qloo-empty"><Sparkles size={24}/><div><h3>Live cultural connections are waiting for the event credential.</h3><p>{result.qloo.message}</p></div></div>}
           </section>
         </div>
@@ -170,7 +176,7 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
               <span className="media-type">{item.mediaType === "audio" ? <Headphones size={13}/> : <Film size={13}/>} {item.mediaType}</span>
               <h3>{item.title}</h3>
               <p>{item.description}</p>
-              <small>{item.creator} · {item.license}</small>
+              <small>{item.creatorUrl ? <a href={item.creatorUrl} target="_blank" rel="noreferrer">{item.creator}</a> : item.creator} · {item.licenseUrl ? <a href={item.licenseUrl} target="_blank" rel="noreferrer">{item.license}</a> : item.license}{item.attributionVerifiedAt ? ` · verified ${item.attributionVerifiedAt}` : ""}</small>
               <a href={item.sourceUrl} target="_blank" rel="noreferrer">Source and license <ExternalLink size={12}/></a>
             </div>
           </article>)}
@@ -179,7 +185,7 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
 
       <section className="evidence-section" id="evidence">
         <div><p className="section-kicker">04 / Read the evidence</p><h2>Four labels. No blurred lines.</h2><p>Every output carries its evidence type all the way from the agent workflow to the interface.</p></div>
-        <div className="evidence-list">{(Object.keys(evidenceMeta) as EvidenceType[]).map((type) => <div key={type}><EvidenceBadge type={type}/><p>{type === "SOURCE_BACKED_HISTORY" ? "A claim with a retrievable URL." : type === "FAMILY_TESTIMONY" ? "Words supplied by the user and attributed to them." : type === "QLOO_TASTE_CONNECTION" ? "An aggregate affinity from Qloo—not historical proof." : "An engaging bridge explicitly marked as imagined."}</p></div>)}</div>
+        <div className="evidence-list">{(Object.keys(evidenceMeta) as EvidenceType[]).map((type) => <div key={type}><EvidenceBadge type={type}/><p>{type === "SOURCE_BACKED_HISTORY" ? "A claim that passed URL, year, and supporting-excerpt entailment checks." : type === "FAMILY_TESTIMONY" ? "Words supplied by the user and attributed to them." : type === "QLOO_TASTE_CONNECTION" ? "An aggregate affinity from Qloo—not historical proof." : "An engaging bridge explicitly marked as imagined."}</p></div>)}</div>
       </section>
 
       <section className="how" id="how"><div><p className="section-kicker">Agent trace</p><h2>One visible chain of custody.</h2></div><ol>{result.agentTrace.length ? result.agentTrace.map((step, index) => <li key={`${step.tool}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step.tool.replaceAll("_", " ")}</strong><p>{step.detail}</p></div><i className={step.status}/></li>) : ["Parse input", "Retrieve sources", "Describe allowlisted media", "Resolve Qloo entities", "Query Qloo Insights", "Check claims", "Compose response"].map((label, index) => <li key={label}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{label}</strong></div></li>)}</ol></section>

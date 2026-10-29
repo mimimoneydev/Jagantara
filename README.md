@@ -4,7 +4,7 @@
 
 ## About
 
-Jagantara is an evidence-aware heritage and cultural discovery agent. A user supplies a family place, an approximate period, their optional connection to that place, an optional memory, and two or three public cultural interests. The app returns a sourced timeline, a carefully labeled narrative, and—when the event credential is configured—live Qloo discoveries across music, books, film, and destinations.
+Jagantara is an AI agent powered cultural heritage explorer that connects family memories and historical evidence with personalized, playable media and cultural discoveries.
 
 Jagantara is open-source software released under the [MIT License](./LICENSE), allowing reuse, modification, and distribution under the license terms.
 
@@ -14,16 +14,16 @@ Each sample also includes inline playable audio or video from Wikimedia Commons.
 
 ## Why Qloo is indispensable
 
-The historical layer and the taste layer deliberately do different jobs. Public historical sources establish what is documented about a place and period. Qloo establishes aggregate, cross-domain cultural affinity between selected public interests and discoveries. Without Qloo, Jagantara can still show the sourced history, but it refuses to invent the culturally connected music, books, films, or destinations. That honest empty state is part of the product contract.
+The historical layer anchors context while Qloo creates the primary deliverable: a cross-media cultural route with ranked music, book, film, and destination stops. Without Qloo, sourced history remains visible, but the central route is explicitly unavailable rather than fabricated.
 
 The server workflow:
 
 1. Validates and normalizes place, period, attributed personal context, memory, and 2–3 interests.
-2. Retrieves historical source pages and retains their URLs.
-3. Optionally asks DeepSeek through OpenRouter to compose only from those retrieved source excerpts.
-4. Searches Qloo `/search` once per interest and stores the returned entity IDs.
-5. Calls Qloo `/v2/insights` for `artist`, `book`, `movie`, and `destination` with `signal.interests.entities` and `feature.explainability=true`.
-6. Rejects source-backed history without a URL and Qloo connections without a Qloo entity ID.
+2. Starts historical composition and Qloo resolution concurrently under a 22-second Qloo deadline.
+3. Sends named entities to typed `/search` and genres/cultural concepts to `/v2/tags`.
+4. Scores candidates by normalized name overlap, expected type, confidence threshold, and runner-up margin; ambiguous results are rejected.
+5. Calls four `/v2/insights` categories concurrently with verified entity/tag IDs; partial failures preserve successful categories.
+6. Requires a supporting excerpt and validates year consistency plus lexical entailment instead of accepting URL presence.
 7. Returns a visible tool trace and evidence type on every item.
 
 Every output is persisted in the response as one of:
@@ -43,7 +43,7 @@ Jagantara never infers ethnicity or genealogy from a surname, and Qloo affinitie
 - Direct, server-only Qloo client in `lib/qloo.ts`
 - Wikimedia API source retrieval with linked Wikipedia evidence in `lib/history.ts`
 - Optional OpenRouter chat-completions adapter in `lib/openrouter.ts`
-- No database is required for the account-free MVP; Qloo GET results use a bounded in-memory cache (64 entries, 10-minute TTL)
+- No database is required for the account-free MVP; Qloo GET results use a bounded in-memory cache (96 entries, 10-minute TTL)
 
 ## Local setup
 
@@ -68,9 +68,10 @@ npm test
 npm run typecheck
 npm run lint
 npm run build
+npm run test:e2e
 ```
 
-The tests cover OpenRouter’s request contract, Wikimedia source retrieval, evidence/claim labeling, multiple Qloo response shapes, honest 401/403/429 behavior, and taste-swap invariants with mocked Qloo calls.
+Unit tests cover OpenRouter’s exact-excerpt contract, source entailment, tag/entity resolution, Qloo response shapes, 401/403/429 behavior, and taste invariants. Playwright covers the judge journey, axe accessibility, custom taste switching, and a 390px mobile viewport. Set `PLAYWRIGHT_BASE_URL` to run the same suite against a deployed origin.
 
 To exercise the compiled Cloudflare Worker locally with the variables in `.env`:
 
@@ -86,15 +87,16 @@ The implementation follows the current public Qloo documentation and hackathon k
 
 - Hackathon base URL: `https://hackathon.api.qloo.com`
 - Authentication: `X-Api-Key` request header
-- Entity resolution: `GET /search?query=...`
+- Typed entity resolution: `GET /search?query=...&types=...`
+- Genre/concept resolution: `GET /v2/tags?query=...`
 - Recommendations: `GET /v2/insights`
 - Output category: `filter.type`
-- Taste signals: `signal.interests.entities`
+- Taste signals: `signal.interests.entities` and `signal.interests.tags`
 - Explanation request: `feature.explainability=true`
 
-Hackathon keys have rate and monthly quota limits, and remain active through the end of judging. Qloo can raise limits per user through the hackathon support channel, so the code does not hard-code invented numbers. It reports 401 authentication failures, 403 unsupported entity types, 429 plus `Retry-After` when supplied, 400/unsupported-query responses, empty results, and two bounded 25-second attempts. No failure path substitutes recommendations.
+The client retries only transient network/5xx/429 responses, honors a bounded `Retry-After`, caps attempts at 6.5 seconds, isolates categories with `Promise.allSettled`, and enforces a 22-second end-to-end Qloo budget. No failure path substitutes recommendations.
 
-The integration does not use the unsupported legacy `/recs` or `/recommendations` endpoints. Free-form interests are first resolved through `/search`; only returned Qloo entity IDs are passed to Insights.
+The integration does not use legacy `/recs` or `/recommendations` endpoints. Only typed, scored, non-ambiguous Qloo entity or tag IDs are passed to Insights.
 
 The parser accepts the documented `results.entities` shape and defensive variants observed across Qloo surfaces. Live verification still depends on the validity, quota, and permissions of the configured event-issued credential.
 

@@ -7,7 +7,7 @@ export async function composeWithOpenRouter(input: JourneyInput, sources: Histor
   if ((process.env.LLM_PROVIDER || "none") !== "openrouter" || !apiKey || !sources.length) return null;
   const sourcePacket = sources.map((source, index) => `[${index + 1}] ${source.title}\nURL: ${source.url}\n${source.extract}`).join("\n\n");
   const prompt = `You are the composition step in an evidence-aware heritage research workflow.
-Create JSON only with keys timeline and narrative. Timeline has at most 4 concise objects: title, body, year (optional), sourceIndex. Every historical claim must be directly supported by exactly one supplied source. Reject anything unsupported. Narrative has 1 or 2 objects: title, body, evidenceType. evidenceType must be FAMILY_TESTIMONY when paraphrasing the user's stated connection or supplied memory, otherwise CREATIVE_RECONSTRUCTION. Never infer ethnicity, genealogy, or identity. Clearly state that reconstruction is imagined.
+Create JSON only with keys timeline and narrative. Timeline has at most 4 concise objects: title, body, year (optional), sourceIndex, supportingExcerpt. supportingExcerpt must be an exact contiguous quote copied from that source and must directly support every material claim in body. Reject anything unsupported. Narrative has 1 or 2 objects: title, body, evidenceType. evidenceType must be FAMILY_TESTIMONY when paraphrasing the user's stated connection or supplied memory, otherwise CREATIVE_RECONSTRUCTION. Never infer ethnicity, genealogy, or identity. Clearly state that reconstruction is imagined.
 
 Place: ${input.place}\nPeriod: ${input.period}\nUser's stated connection to the place: ${input.connection || "None supplied"}\nMemory attributed to the user: ${input.memory || "None supplied"}\n\nSources:\n${sourcePacket}`;
   const controller = new AbortController();
@@ -44,8 +44,10 @@ Place: ${input.place}\nPeriod: ${input.period}\nUser's stated connection to the 
     const timeline = (result.timeline || []).flatMap((item, index) => {
       const sourceIndex = Number(item.sourceIndex) - 1;
       const source = sources[sourceIndex];
-      if (!source || typeof item.title !== "string" || typeof item.body !== "string") return [];
-      return [{ id: `history:generated-${index}`, title: item.title, body: item.body, year: typeof item.year === "number" ? item.year : undefined, evidenceType: "SOURCE_BACKED_HISTORY" as const, sourceUrl: source.url, sourceTitle: source.title }];
+      if (!source || typeof item.title !== "string" || typeof item.body !== "string" || typeof item.supportingExcerpt !== "string") return [];
+      const supportingExcerpt = item.supportingExcerpt.trim();
+      if (!supportingExcerpt || !source.extract.toLowerCase().includes(supportingExcerpt.toLowerCase())) return [];
+      return [{ id: `history:generated-${index}`, title: item.title, body: item.body, year: typeof item.year === "number" ? item.year : undefined, evidenceType: "SOURCE_BACKED_HISTORY" as const, sourceUrl: source.url, sourceTitle: source.title, supportingExcerpt }];
     });
     const narrative = (result.narrative || []).flatMap((item, index) => {
       if (typeof item.title !== "string" || typeof item.body !== "string") return [];

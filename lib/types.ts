@@ -15,6 +15,13 @@ export type EvidenceItem = {
   sourceUrl?: string;
   sourceTitle?: string;
   year?: number;
+  /** The bounded source passage used to validate this claim. */
+  supportingExcerpt?: string;
+  entailment?: {
+    status: "verified" | "rejected";
+    score: number;
+    method: "verbatim-source-overlap-v1";
+  };
 };
 
 export type JourneyInput = {
@@ -31,6 +38,10 @@ export type QlooEntity = {
   id: string;
   name: string;
   type: string;
+  query?: string;
+  signalKind?: "entity" | "tag";
+  confidence?: number;
+  verified?: boolean;
 };
 
 export type Discovery = EvidenceItem & {
@@ -50,6 +61,16 @@ export type MediaItem = {
   mediaUrl: string;
   sourceUrl: string;
   license: string;
+  creatorUrl?: string;
+  licenseUrl?: string;
+  attributionVerifiedAt?: string;
+};
+
+export type CulturalRoute = {
+  title: string;
+  summary: string;
+  stops: Discovery[];
+  completeCategories: Discovery["category"][];
 };
 
 export type ServiceState = {
@@ -70,6 +91,7 @@ export type JourneyResult = {
   timeline: EvidenceItem[];
   narrative: EvidenceItem[];
   discoveries: Discovery[];
+  culturalRoute: CulturalRoute | null;
   media: MediaItem[];
   resolvedInterests: QlooEntity[];
   qloo: ServiceState;

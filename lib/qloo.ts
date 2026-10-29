@@ -1,192 +1,163 @@
 import type { Discovery, QlooEntity, ServiceState } from "./types";
 
-const QLOO_HACKATHON_BASE_URL = "https://hackathon.api.qloo.com";
-const QLOO_REQUEST_TIMEOUT_MS = 25_000;
-const MAX_CACHE_ENTRIES = 64;
-const CACHE_TTL_MS = 10 * 60 * 1000;
+const BASE = "https://hackathon.api.qloo.com";
 const cache = new Map<string, { expires: number; value: unknown }>();
-
-type QlooRawEntity = Record<string, unknown>;
+type Raw = Record<string, unknown>;
+type Intent = { query: string; kind: "entity" | "tag"; expectedType?: string };
+const SEEDED: Record<string, string> = {
+  "joy harjo": "urn:entity:person", "colm toibin": "urn:entity:person",
+  "duke ellington": "urn:entity:artist", "langston hughes": "urn:entity:person",
+};
 
 export class QlooError extends Error {
-  constructor(
-    message: string,
-    public readonly state: ServiceState,
-  ) {
-    super(message);
-  }
+  constructor(message: string, public readonly state: ServiceState) { super(message); }
+}
+
+export function classifySignal(query: string): Intent {
+  const expectedType = SEEDED[norm(query)];
+  if (expectedType) return { query, kind: "entity", expectedType };
+  if (/\b(band|orchestra|ensemble|singer|rapper|musician|quartet)\b/i.test(query))
+    return { query, kind: "entity", expectedType: "urn:entity:artist" };
+  return { query, kind: "tag" };
 }
 
 export async function resolveQlooInterests(interests: string[]): Promise<QlooEntity[]> {
-  const resolved: QlooEntity[] = [];
-  for (const interest of interests) {
-    const payload = await qlooGet("/search", { query: interest, take: "5", sort_by: "match" });
-    const candidates = extractEntities(payload);
-    const best = candidates[0];
-    if (best) {
-      const entity = normalizeEntity(best);
-      // Insights accepts Qloo entity IDs, never the original free-form query.
-      if (entity.id) resolved.push(entity);
-    }
+  const settled = await Promise.allSettled(interests.map((query) => resolveOne(classifySignal(query))));
+  const good = settled.flatMap((r) => r.status === "fulfilled" && r.value ? [r.value] : []);
+  if (!good.length) {
+    const error = settled.flatMap((r) => r.status === "rejected" ? [r.reason] : []).find((e) => e instanceof QlooError);
+    if (error) throw error;
   }
-  return resolved;
+  return [...new Map(good.map((signal) => [signal.id, signal])).values()];
 }
 
-export async function getQlooDiscoveries(entities: QlooEntity[]) {
-  if (!entities.length) {
-    return { discoveries: [] as Discovery[], state: { status: "empty", message: "Qloo could not resolve the selected interests, so no Insights request was made." } satisfies ServiceState };
-  }
+async function resolveOne(intent: Intent): Promise<QlooEntity | null> {
+  const payload = intent.kind === "tag"
+    ? await qlooGet("/v2/tags", { query: intent.query, take: "8" })
+    : await qlooGet("/search", { query: intent.query, take: "8", sort_by: "match", ...(intent.expectedType ? { types: intent.expectedType } : {}) });
+  const ranked = (intent.kind === "tag" ? extractTags(payload) : extractEntities(payload))
+    .map((raw) => ({ entity: normalizeEntity(raw, intent.kind), score: candidateScore(intent, raw) }))
+    .filter((item) => item.entity.id).sort((a, b) => b.score - a.score);
+  const best = ranked[0];
+  const second = ranked.find((item) => item.entity.id !== best?.entity.id && norm(item.entity.name) !== norm(best?.entity.name || ""));
+  const ambiguous = Boolean(second && best.score < .98 && best.score - second.score < .08);
+  const typeOk = !intent.expectedType || best?.entity.type === intent.expectedType || best?.entity.type.endsWith(intent.expectedType.split(":").at(-1)!);
+  if (!best || best.score < (intent.kind === "entity" ? .72 : .56) || ambiguous || !typeOk) return null;
+  return { ...best.entity, query: intent.query, signalKind: intent.kind, confidence: +best.score.toFixed(3), verified: true };
+}
 
-  const categories = [
-    ["music", "urn:entity:artist"],
-    ["books", "urn:entity:book"],
-    ["film", "urn:entity:movie"],
-    ["destinations", "urn:entity:destination"],
-  ] as const;
-  const discoveries: Discovery[] = [];
-  for (const [category, type] of categories) {
+export async function getQlooDiscoveries(signals: QlooEntity[]) {
+  const verified = signals.filter((s) => s.verified !== false && s.id);
+  if (!verified.length) return { discoveries: [] as Discovery[], state: { status: "empty", message: "No taste signals passed name, type, and ambiguity checks; Insights was not queried." } satisfies ServiceState };
+  const categories = [["music", "urn:entity:artist"], ["books", "urn:entity:book"], ["film", "urn:entity:movie"], ["destinations", "urn:entity:destination"]] as const;
+  const entities = verified.filter((s) => s.signalKind !== "tag");
+  const tags = verified.filter((s) => s.signalKind === "tag");
+  const settled = await Promise.allSettled(categories.map(async ([category, type]) => {
     const payload = await qlooGet("/v2/insights", {
       "filter.type": type,
-      "signal.interests.entities": entities.map((entity) => entity.id).join(","),
-      "feature.explainability": "true",
-      take: "3",
+      ...(entities.length ? { "signal.interests.entities": entities.map((s) => s.id).join(",") } : {}),
+      ...(tags.length ? { "signal.interests.tags": tags.map((s) => s.id).join(",") } : {}),
+      "feature.explainability": "true", take: "3",
     });
-    for (const raw of extractEntities(payload).slice(0, 3)) {
-      const discovery = normalizeDiscovery(raw, category, entities);
-      if (discovery) discoveries.push(discovery);
-    }
+    return extractEntities(payload).slice(0, 3).flatMap((raw) => {
+      const value = normalizeDiscovery(raw, category, verified); return value ? [value] : [];
+    });
+  }));
+  const discoveries = settled.flatMap((r) => r.status === "fulfilled" ? r.value : []);
+  const failures = settled.filter((r) => r.status === "rejected").length;
+  if (!discoveries.length) {
+    const error = settled.flatMap((r) => r.status === "rejected" ? [r.reason] : []).find((e) => e instanceof QlooError) as QlooError | undefined;
+    if (error) return { discoveries, state: error.state };
   }
-
-  return {
-    discoveries,
-    state: discoveries.length
-      ? ({ status: "live", message: "Live Qloo entity resolution and Insights results. Affinities are aggregate cultural connections, not personal or historical evidence." } satisfies ServiceState)
-      : ({ status: "empty", message: "Qloo returned no discoveries for this combination. Nothing was substituted." } satisfies ServiceState),
-  };
+  return { discoveries, state: discoveries.length
+    ? { status: "live", message: failures ? `Live Qloo route built from ${4 - failures} of 4 categories; partial failures remain visible.` : "Live Qloo route built from verified entity and tag signals across four categories." }
+    : { status: "empty", message: "Qloo returned no verified discoveries; nothing was substituted." } } as { discoveries: Discovery[]; state: ServiceState };
 }
 
-export function extractEntities(payload: unknown): QlooRawEntity[] {
-  if (!payload || typeof payload !== "object") return [];
-  const root = payload as Record<string, unknown>;
-  const candidates = [
-    root.results,
-    (root.results as Record<string, unknown> | undefined)?.entities,
-    root.entities,
-    (root.data as Record<string, unknown> | undefined)?.results,
-    ((root.data as Record<string, unknown> | undefined)?.results as Record<string, unknown> | undefined)?.entities,
-  ];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) return candidate.filter((item): item is QlooRawEntity => !!item && typeof item === "object");
-  }
+export function extractEntities(payload: unknown): Raw[] { return extract(payload, "entities"); }
+export function extractTags(payload: unknown): Raw[] { return extract(payload, "tags"); }
+function extract(payload: unknown, key: "entities" | "tags") {
+  if (!isRecord(payload)) return [];
+  const data = obj(payload.data), results = obj(payload.results), dataResults = obj(data.results);
+  for (const value of [payload.results, results[key], payload[key], data.results, dataResults[key], data[key]])
+    if (Array.isArray(value)) return value.filter(isRecord);
   return [];
 }
 
-export function normalizeEntity(raw: QlooRawEntity): QlooEntity {
-  const id = stringValue(raw.entity_id) || stringValue(raw.id);
+export function normalizeEntity(raw: Raw, kind: "entity" | "tag" = "entity"): QlooEntity {
+  const type = raw.subtype ?? raw.type ?? raw.types;
   return {
-    id,
-    name: stringValue(raw.name) || "Untitled Qloo entity",
-    type: stringValue(raw.subtype) || stringValue(raw.type) || "urn:entity",
+    id: str(raw.entity_id) || str(raw.tag_id) || str(raw.id),
+    name: str(raw.name) || str(raw.tag_name) || str(raw.value) || "Untitled Qloo signal",
+    type: kind === "tag" ? "urn:tag" : typeof type === "string" ? type : Array.isArray(type) ? str(type[0]) : str(obj(type).id) || "urn:entity",
+    signalKind: kind,
   };
 }
 
-function normalizeDiscovery(raw: QlooRawEntity, category: Discovery["category"], signals: QlooEntity[]): Discovery | null {
-  const entity = normalizeEntity(raw);
-  if (!entity.id) return null;
-  const properties = objectValue(raw.properties);
-  const query = objectValue(raw.query);
-  const explainability = objectValue(query.explainability);
-  const signalScores = Object.entries(explainability)
-    .filter(([, value]) => typeof value === "number")
-    .sort((a, b) => Number(b[1]) - Number(a[1]));
-  const explanation = signalScores.length
-    ? signalScores.slice(0, 3).map(([id, score]) => `${signals.find((signal) => signal.id === id)?.name || "Selected interest"} contributed ${Math.round(Number(score) * 100)}% of the displayed explanation score.`)
-    : signals.slice(0, 2).map((signal) => `Connected by Qloo to the resolved entity “${signal.name}”; this is an aggregate affinity, not a claim about you.`);
-  const affinity = numberValue(raw.affinity) ?? numberValue(raw.score) ?? numberValue(query.affinity);
-  return {
-    id: `qloo:${entity.id}`,
-    qlooEntityId: entity.id,
-    title: entity.name,
-    body: stringValue(properties.description) || `A Qloo ${category} connection based on the selected cultural signals.`,
-    evidenceType: "QLOO_TASTE_CONNECTION",
-    category,
-    imageUrl: imageUrl(properties.image),
-    explanation,
-    affinity,
-  };
+export function candidateScore(intent: Intent, raw: Raw) {
+  const entity = normalizeEntity(raw, intent.kind), q = norm(intent.query), n = norm(entity.name);
+  if (!q || !n) return 0;
+  const qt = new Set(q.split(" ")), nt = new Set(n.split(" "));
+  const intersection = [...qt].filter((t) => nt.has(t)).length, union = new Set([...qt, ...nt]).size || 1;
+  const containment = n.includes(q) || q.includes(n) ? Math.min(q.length, n.length) / Math.max(q.length, n.length) : 0;
+  const lexical = q === n ? 1 : (intersection / union) * .82 + containment * .18;
+  const provider = num(raw.score) ?? num(raw.match) ?? 0;
+  const typeBonus = intent.expectedType && (entity.type === intent.expectedType || entity.type.endsWith(intent.expectedType.split(":").at(-1)!)) ? .08 : 0;
+  return Math.min(1, Math.max(lexical, provider * .75) + typeBonus);
+}
+
+function normalizeDiscovery(raw: Raw, category: Discovery["category"], signals: QlooEntity[]): Discovery | null {
+  const entity = normalizeEntity(raw); if (!entity.id) return null;
+  const properties = obj(raw.properties), query = obj(raw.query), explain = obj(query.explainability);
+  const scores = Object.entries(explain).filter(([, v]) => typeof v === "number").sort((a, b) => Number(b[1]) - Number(a[1]));
+  const explanation = scores.length
+    ? scores.slice(0, 3).map(([id, score]) => `${signals.find((s) => s.id === id)?.name || "Verified signal"} contributed ${Math.round(Number(score) * 100)}% of Qloo's displayed explanation score.`)
+    : signals.slice(0, 2).map((s) => `Connected by Qloo to verified ${s.signalKind} “${s.name}” (${Math.round((s.confidence || 1) * 100)}% resolver confidence).`);
+  return { id: `qloo:${entity.id}`, qlooEntityId: entity.id, title: entity.name,
+    body: str(properties.description) || `A live Qloo ${category} connection based on verified cultural signals.`,
+    evidenceType: "QLOO_TASTE_CONNECTION", category, imageUrl: image(properties.image), explanation,
+    affinity: num(raw.affinity) ?? num(raw.score) ?? num(query.affinity) };
 }
 
 async function qlooGet(path: string, params: Record<string, string>): Promise<unknown> {
-  const apiKey = process.env.QLOO_API_KEY?.trim();
-  if (!apiKey) throw new QlooError("QLOO_API_KEY is not configured.", { status: "unconfigured", message: "Qloo is not configured. No recommendations were generated." });
-  const url = new URL(path, qlooBaseUrl());
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  const cacheKey = url.toString();
-  const cached = cache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) return cached.value;
-
-  const response = await boundedFetch(url, apiKey);
-  if (response.status === 401) {
-    throw new QlooError("Qloo rejected the credential.", { status: "unauthorized", message: "Qloo authentication failed. The server did not fall back to invented results." });
-  }
-  if (response.status === 403) {
-    throw new QlooError("Qloo rejected the requested entity type.", { status: "error", message: "Qloo does not permit one of the requested entity types. No substitute results were used." });
-  }
-  if (response.status === 429) {
-    const retryAfter = Number(response.headers.get("retry-after"));
-    throw new QlooError("Qloo rate limit reached.", { status: "rate_limited", message: "Qloo rate limit reached. Try again after the indicated window.", retryAfterSeconds: Number.isFinite(retryAfter) ? retryAfter : undefined });
-  }
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 180);
-    throw new QlooError(`Qloo request failed (${response.status}).`, { status: "error", message: response.status === 400 ? `Qloo could not support this query or region. ${detail}` : `Qloo request failed with status ${response.status}. No substitute results were used.` });
-  }
-  const payload = await response.json();
-  setCache(cacheKey, payload);
-  return payload;
+  const key = process.env.QLOO_API_KEY?.trim();
+  if (!key) throw new QlooError("Missing key", { status: "unconfigured", message: "Qloo is not configured; no recommendations were generated." });
+  const url = new URL(path, qlooBase()); Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  const hit = cache.get(url.toString()); if (hit && hit.expires > Date.now()) return hit.value;
+  const response = await resilientFetch(url, key);
+  if (response.status === 401) throw new QlooError("Unauthorized", { status: "unauthorized", message: "Qloo authentication failed; no substitute results were used." });
+  if (response.status === 403) throw new QlooError("Forbidden", { status: "error", message: "Qloo rejected a signal or entity type; no substitute results were used." });
+  if (response.status === 429) throw new QlooError("Rate limited", { status: "rate_limited", message: "Qloo rate limit reached after a bounded retry; completed categories remain visible.", retryAfterSeconds: retryAfter(response.headers.get("retry-after")) });
+  if (!response.ok) throw new QlooError("Request failed", { status: "error", message: `Qloo request failed with status ${response.status}; completed categories remain visible.` });
+  const value = await response.json(); if (cache.size >= 96) cache.delete(cache.keys().next().value!); cache.set(url.toString(), { expires: Date.now() + 600_000, value }); return value;
 }
 
-async function boundedFetch(url: URL, apiKey: string) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), QLOO_REQUEST_TIMEOUT_MS);
+async function resilientFetch(url: URL, key: string) {
+  let last: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 6_500);
     try {
-      return await fetch(url, { method: "GET", headers: { accept: "application/json", "X-Api-Key": apiKey }, signal: controller.signal });
-    } catch (error) {
-      if (attempt === 1) throw new QlooError("Qloo timed out.", { status: "timeout", message: "Qloo timed out after two bounded attempts. No recommendations were fabricated." });
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      if (!(error instanceof Error)) break;
-    } finally {
-      clearTimeout(timer);
-    }
+      const response = await fetch(url, { method: "GET", headers: { accept: "application/json", "X-Api-Key": key }, signal: controller.signal });
+      if ((response.status !== 429 && response.status < 500) || attempt === 1) return response;
+      await wait(response.status === 429 ? Math.min(1200, (retryAfter(response.headers.get("retry-after")) || .2) * 1000) : 180);
+    } catch (error) { last = error; if (!attempt) await wait(180); }
+    finally { clearTimeout(timer); }
   }
-  throw new QlooError("Qloo request failed.", { status: "error", message: "Qloo could not be reached. No recommendations were fabricated." });
+  const timeout = last instanceof Error && last.name === "AbortError";
+  throw new QlooError("Unavailable", { status: timeout ? "timeout" : "error", message: timeout ? "Qloo exceeded its 13-second bounded request budget; no recommendations were fabricated." : "Qloo could not be reached; no recommendations were fabricated." });
 }
 
-function qlooBaseUrl() {
-  const configured = process.env.QLOO_BASE_URL?.trim() || QLOO_HACKATHON_BASE_URL;
-  let url: URL;
-  try {
-    url = new URL(configured);
-  } catch {
-    throw new QlooError("QLOO_BASE_URL is invalid.", { status: "error", message: "Qloo is misconfigured: QLOO_BASE_URL must be the official hackathon URL." });
-  }
-  if (url.origin !== QLOO_HACKATHON_BASE_URL || (url.pathname !== "/" && url.pathname !== "")) {
-    throw new QlooError("QLOO_BASE_URL is not the hackathon environment.", { status: "error", message: `Qloo is misconfigured: hackathon keys require ${QLOO_HACKATHON_BASE_URL}.` });
-  }
-  return QLOO_HACKATHON_BASE_URL;
+function qlooBase() {
+  const configured = process.env.QLOO_BASE_URL?.trim() || BASE; let url: URL;
+  try { url = new URL(configured); } catch { throw new QlooError("Invalid base", { status: "error", message: "QLOO_BASE_URL must be the official hackathon URL." }); }
+  if (url.origin !== BASE || !["", "/"].includes(url.pathname)) throw new QlooError("Wrong base", { status: "error", message: `Qloo is misconfigured: hackathon keys require ${BASE}.` });
+  return BASE;
 }
-
-function setCache(key: string, value: unknown) {
-  if (cache.size >= MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value as string);
-  cache.set(key, { expires: Date.now() + CACHE_TTL_MS, value });
-}
-
-function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-function stringValue(value: unknown) { return typeof value === "string" ? value : ""; }
-function numberValue(value: unknown) { return typeof value === "number" ? value : undefined; }
-function imageUrl(value: unknown) {
-  if (typeof value === "string") return value;
-  return stringValue(objectValue(value).url) || undefined;
-}
+function norm(v: string) { return v.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+function retryAfter(v: string | null) { if (!v) return undefined; const n = Number(v); return Number.isFinite(n) ? Math.max(0, n) : undefined; }
+function isRecord(v: unknown): v is Raw { return Boolean(v) && typeof v === "object" && !Array.isArray(v); }
+function obj(v: unknown): Raw { return isRecord(v) ? v : {}; }
+function str(v: unknown) { return typeof v === "string" ? v : ""; }
+function num(v: unknown) { return typeof v === "number" ? v : undefined; }
+function image(v: unknown) { return typeof v === "string" ? v : str(obj(v).url) || undefined; }
+function wait(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
