@@ -88,7 +88,7 @@ The implementation follows the current public Qloo documentation and hackathon k
 - Hackathon base URL: `https://hackathon.api.qloo.com`
 - Authentication: `X-Api-Key` request header
 - Typed entity resolution: `GET /search?query=...&types=...`
-- Genre/concept resolution: `GET /v2/tags?query=...`
+- Genre/concept resolution: `GET /v2/tags?filter.query=...`
 - Recommendations: `GET /v2/insights`
 - Output category: `filter.type`
 - Taste signals: `signal.interests.entities` and `signal.interests.tags`

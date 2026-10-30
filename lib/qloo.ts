@@ -33,7 +33,7 @@ export async function resolveQlooInterests(interests: string[]): Promise<QlooEnt
 
 async function resolveOne(intent: Intent): Promise<QlooEntity | null> {
   const payload = intent.kind === "tag"
-    ? await qlooGet("/v2/tags", { query: intent.query, take: "8" })
+    ? await qlooGet("/v2/tags", { "filter.query": intent.query, take: "8" })
     : await qlooGet("/search", { query: intent.query, take: "8", sort_by: "match", ...(intent.expectedType ? { types: intent.expectedType } : {}) });
   const ranked = (intent.kind === "tag" ? extractTags(payload) : extractEntities(payload))
     .map((raw) => ({ entity: normalizeEntity(raw, intent.kind), score: candidateScore(intent, raw) }))

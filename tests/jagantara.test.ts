@@ -132,11 +132,18 @@ test("Qloo parser accepts documented and defensive response shapes", () => {
 
 test("Qloo tag parser and ambiguity gate reject an unresolved cultural concept", async () => {
   assert.equal(extractTags({ results: { tags: [{ tag_id: "tag-1" }] } })[0].tag_id, "tag-1");
-  globalThis.fetch = async () => Response.json({ results: [
+  let requestUrl: URL | undefined;
+  globalThis.fetch = async (input) => {
+    requestUrl = new URL(String(input));
+    return Response.json({ results: [
     { tag_id: "ireland", name: "Folk music of Ireland" },
     { tag_id: "italy", name: "Folk music of Italy" },
-  ] });
+    ] });
+  };
   assert.deepEqual(await resolveQlooInterests(["folk music"]), []);
+  assert.equal(requestUrl?.pathname, "/v2/tags");
+  assert.equal(requestUrl?.searchParams.get("filter.query"), "folk music");
+  assert.equal(requestUrl?.searchParams.get("query"), null);
 });
 
 test("seeded named entities must match their expected Qloo type", async () => {
@@ -246,7 +253,7 @@ test("taste swap keeps history stable while changing Qloo signals and discoverie
       return Response.json({ results: [{ entity_id: `id-${name.replaceAll(" ", "-")}`, name, subtype: "urn:entity:artist" }] });
     }
     if (url.pathname === "/v2/tags") {
-      const name = url.searchParams.get("query") || "unknown";
+      const name = url.searchParams.get("filter.query") || "unknown";
       return Response.json({ results: [{ tag_id: `tag-${name.replaceAll(" ", "-")}`, name }] });
     }
     const signal = [url.searchParams.get("signal.interests.entities"), url.searchParams.get("signal.interests.tags")].filter(Boolean).join(",") || "none";
