@@ -1,6 +1,37 @@
+<div align="center">
+
 # Jagantara
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+### AI-powered cultural heritage discovery
+
+[![MIT License](https://img.shields.io/badge/MIT_LICENSE-Open_Source-2ea44f?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](./LICENSE)
+
+**Core API and runtime**
+
+[![Qloo API](https://img.shields.io/badge/Qloo-Cultural_Intelligence-6C4DFF?style=for-the-badge&logoColor=white)](https://www.qloo.com/)
+[![Wikimedia API](https://img.shields.io/badge/Wikimedia-Search_API-006699?style=for-the-badge&logo=wikimediafoundation&logoColor=white)](https://api.wikimedia.org/)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?style=for-the-badge&logo=cloudflareworkers&logoColor=white)](https://workers.cloudflare.com/)
+
+**AI and LLM providers**
+
+[![OpenRouter](https://img.shields.io/badge/OpenRouter-LLM_Gateway-6467F2?style=for-the-badge&logo=openrouter&logoColor=white)](https://openrouter.ai/)
+[![DeepSeek](https://img.shields.io/badge/DeepSeek-V4.1_Flash-4D6BFE?style=for-the-badge&logo=deepseek&logoColor=white)](https://www.deepseek.com/)
+
+**Historical and media providers**
+
+[![Wikipedia](https://img.shields.io/badge/Wikipedia-Historical_Sources-000000?style=for-the-badge&logo=wikipedia&logoColor=white)](https://www.wikipedia.org/)
+[![Wikimedia Commons](https://img.shields.io/badge/Wikimedia_Commons-Playable_Media-006699?style=for-the-badge&logo=wikimediacommons&logoColor=white)](https://commons.wikimedia.org/)
+[![Creative Commons](https://img.shields.io/badge/Creative_Commons-Licensed_Media-EF9421?style=for-the-badge&logo=creativecommons&logoColor=white)](https://creativecommons.org/)
+[![Public Domain](https://img.shields.io/badge/Public_Domain-Reusable_Media-5C5C5C?style=for-the-badge&logo=creativecommons&logoColor=white)](https://creativecommons.org/publicdomain/)
+
+**Application stack**
+
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vite.dev/)
+
+</div>
 
 ## About
 
@@ -300,4 +331,10 @@ The public host must expose `/api/journey` and `/api/health`; a static export is
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+Jagantara is released under the **MIT License**, a permissive open-source license. It allows anyone to use, copy, modify, merge, publish, distribute, sublicense, and sell copies of the project, including for commercial purposes.
+
+Anyone redistributing the software or a substantial portion of it must preserve the original copyright notice and MIT permission notice. The software is provided **“as is,” without warranty of any kind**, and the authors or copyright holders are not liable for claims, damages, or other liability arising from its use.
+
+Copyright © 2026 Jagantara contributors. Read the complete license text in [LICENSE](./LICENSE).
+
+The MIT License applies to Jagantara's original source code and documentation. Third-party APIs, models, archival material, fonts, audio, video, and other media remain subject to their respective providers' terms and licenses. Each curated media item exposes its own creator, source, and license attribution in the application.
