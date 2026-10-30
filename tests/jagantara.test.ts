@@ -4,7 +4,6 @@ import { runHeritageAgent } from "../lib/agent";
 import { baseDemoResult, demoInput, demoProfiles, demoSampleOrder, demoSamples, getDemoSample } from "../lib/demo";
 import { claimCheck } from "../lib/evidence";
 import { retrieveHistoricalSources } from "../lib/history";
-import { findPublicMediaForDiscoveries } from "../lib/media";
 import { parseJourneyInput } from "../lib/input";
 import { extractEntities, extractTags, getQlooDiscoveries, QlooError, resolveQlooInterests } from "../lib/qloo";
 import { composeWithOpenRouter, describeMediaWithOpenRouter } from "../lib/openrouter";
@@ -72,32 +71,6 @@ test("OpenRouter can describe allowlisted media without changing its URL or lice
   assert.equal(described?.[0]?.license, "CC0");
 });
 
-test("public media is discovered dynamically from a Qloo title with verified Commons attribution", async () => {
-  let requestUrl: URL | undefined;
-  globalThis.fetch = async (input) => {
-    requestUrl = new URL(String(input));
-    return Response.json({ query: { pages: { "42": {
-      pageid: 42, index: 1, title: "File:Qloo artist live.ogg",
-      imageinfo: [{ url: "https://upload.wikimedia.org/qloo-artist.ogg", mime: "application/ogg", mediatype: "AUDIO", extmetadata: {
-        Artist: { value: '<a href="//commons.wikimedia.org/wiki/User:Creator">Verified Creator</a>' },
-        LicenseShortName: { value: "CC BY-SA 4.0" },
-        LicenseUrl: { value: "https://creativecommons.org/licenses/by-sa/4.0" },
-        ImageDescription: { value: "A public live performance." },
-      } }],
-    } } } });
-  };
-  const media = await findPublicMediaForDiscoveries([{
-    id: "qloo:artist", qlooEntityId: "artist", title: "Qloo Artist", body: "Recommendation", evidenceType: "QLOO_TASTE_CONNECTION",
-    category: "music", explanation: ["Live Qloo signal"],
-  }]);
-  assert.equal(requestUrl?.hostname, "commons.wikimedia.org");
-  assert.match(requestUrl?.searchParams.get("gsrsearch") || "", /filetype:audio Qloo Artist/);
-  assert.equal(media[0]?.relatedDiscoveryTitle, "Qloo Artist");
-  assert.equal(media[0]?.creator, "Verified Creator");
-  assert.equal(media[0]?.license, "CC BY-SA 4.0");
-  assert.equal(media[0]?.mediaUrl, "https://upload.wikimedia.org/qloo-artist.ogg");
-});
-
 test("personal context is accepted without collecting identifiers", () => {
   const parsed = parseJourneyInput({
     place: "Kampala, Uganda",
@@ -118,7 +91,8 @@ test("every judge sample resolves to a distinct sourced evidence packet", () => 
     assert.equal(result.timeline.length, 3);
     assert.ok(result.timeline.every((item) => item.evidenceType === "SOURCE_BACKED_HISTORY" && item.sourceUrl?.startsWith("https://")));
     assert.ok(result.narrative.some((item) => item.evidenceType === "FAMILY_TESTIMONY" && item.sourceTitle?.includes("fictional sample")));
-    assert.deepEqual(result.media, [], "media must wait for live Qloo discoveries instead of using a seeded player");
+    assert.ok(result.media.length >= 1);
+    assert.ok(result.media.every((item) => new URL(item.mediaUrl).hostname === "upload.wikimedia.org" && item.license && item.attributionVerifiedAt));
   }
 });
 
@@ -279,17 +253,6 @@ test("taste swap keeps history stable while changing Qloo signals and discoverie
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
     if (url.hostname === "openrouter.ai") {
       return Response.json({ choices: [{ message: { content: JSON.stringify({ descriptions: [{ id: "media:cherokee-sovereignty", description: "Bounded AI description." }] }) } }] });
-    }
-    if (url.hostname === "archive.org") return Response.json({ response: { docs: [] } });
-    if (url.hostname === "commons.wikimedia.org") {
-      const video = url.searchParams.get("gsrsearch")?.includes("filetype:video");
-      const matchedTitle = (url.searchParams.get("gsrsearch") || "Qloo result").replace(/^filetype:(?:audio|video)\s+/, "");
-      return Response.json({ query: { pages: { "7": {
-        pageid: 7, index: 1, title: `File:${matchedTitle}${video ? ".webm" : ".ogg"}`,
-        imageinfo: [{ url: video ? "https://upload.wikimedia.org/result.webm" : "https://upload.wikimedia.org/result.ogg", mediatype: video ? "VIDEO" : "AUDIO", extmetadata: {
-          Artist: { value: "Test Creator" }, LicenseShortName: { value: "CC BY 4.0" }, LicenseUrl: { value: "https://creativecommons.org/licenses/by/4.0" },
-        } }],
-      } } } });
     }
     if (url.pathname === "/search") {
       const name = url.searchParams.get("query") || "unknown";

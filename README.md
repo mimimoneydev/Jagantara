@@ -10,7 +10,7 @@ Jagantara is open-source software released under the [MIT License](./LICENSE), a
 
 The account-free judge journey offers four disclosed fictional samples: Native American history centered on Tahlequah and the Cherokee Nation, Irish and Italian immigration in New York, and African American history in Harlem. The samples do not claim ancestry, and every historical claim links to a retrievable source. Swapping the taste lens keeps a selected sample’s facts byte-for-byte stable while sending a different set of resolved Qloo entity IDs to Insights.
 
-After Qloo returns live music and film discoveries, Jagantara searches Internet Archive and Wikimedia Commons dynamically using those discovery titles. Only relevant, playable files with a free license and creator metadata are accepted. OpenRouter may refine their descriptions, but it cannot select or replace the Qloo relationship, player URL, creator, or license.
+Each sample also includes inline playable audio or video from Wikimedia Commons. Media URLs, creators, and free-license labels come from a fixed allowlist. When OpenRouter is available, it may refine the short descriptions using only that supplied metadata; it cannot add or replace player URLs.
 
 ## Why Qloo is indispensable
 
@@ -35,15 +35,199 @@ Every output is persisted in the response as one of:
 
 Jagantara never infers ethnicity or genealogy from a surname, and Qloo affinities are never described as historical proof or as an individual preference.
 
-## Stack and architecture
+## System architecture
 
-- Next.js 16 + TypeScript + React 19 (built through Vinext for Cloudflare Workers/Sites)
-- Server-side route handlers under `app/api`
-- A tool-oriented agent orchestrator in `lib/agent.ts`
-- Direct, server-only Qloo client in `lib/qloo.ts`
-- Wikimedia API source retrieval with linked Wikipedia evidence in `lib/history.ts`
-- Optional OpenRouter chat-completions adapter in `lib/openrouter.ts`
-- No database is required for the account-free MVP; Qloo GET results use a bounded in-memory cache (96 entries, 10-minute TTL)
+Jagantara is a stateless, account-free React application deployed as a Cloudflare Worker. Next.js route and component conventions are compiled by Vinext/Vite into the Worker bundle. The browser owns presentation state; all credentialed calls, evidence processing, and recommendation orchestration remain server-side.
+
+```mermaid
+flowchart TB
+  subgraph Browser["Browser — public trust boundary"]
+    User["Visitor"]
+    UI["AtlasApp React client\nform, samples, timeline, media players"]
+    Monitor["Operator or health monitor"]
+    User --> UI
+  end
+
+  subgraph Worker["Cloudflare Worker — server trust boundary"]
+    Page["Server-rendered page\napp/page.tsx"]
+    Journey["POST /api/journey\nno-store JSON response"]
+    Health["GET /api/health\nconfiguration booleans only"]
+    Validate["Input validation\nlib/input.ts"]
+    Agent["Heritage agent orchestrator\nlib/agent.ts"]
+
+    subgraph Content["Historical and narrative pipeline"]
+      Demo["Curated demo packets\nlib/demo.ts"]
+      History["Historical retrieval\nlib/history.ts"]
+      Model["Bounded model adapter\nlib/openrouter.ts"]
+      Evidence["Evidence and entailment gate\nlib/evidence.ts"]
+    end
+
+    subgraph Taste["Qloo taste pipeline"]
+      Resolver["Entity/tag classifier and resolver\nname, type, confidence, ambiguity gates"]
+      Insights["Four-category Insights fan-out\nmusic, books, film, destinations"]
+      QlooClient["Qloo HTTP client and GET cache\n96 entries, 10-minute TTL"]
+      Route["Cultural-route assembler"]
+    end
+
+    Types["Shared response contract\nlib/types.ts"]
+    Secrets["Server-only environment\nQLOO_API_KEY and OPENROUTER_API_KEY"]
+
+    Page --> Demo
+    UI -->|"HTTPS JSON"| Journey
+    Monitor -->|"configuration check"| Health
+    Journey --> Validate --> Agent
+    Agent --> Demo
+    Agent --> History
+    Agent --> Resolver --> QlooClient
+    Agent --> Insights --> QlooClient
+    Agent --> Model
+    Demo --> Evidence
+    History --> Evidence
+    Model --> Evidence
+    Insights --> Evidence
+    Evidence --> Route --> Types
+    Secrets -.-> QlooClient
+    Secrets -.-> Model
+  end
+
+  subgraph Services["External services"]
+    WikimediaSearch["Wikimedia search API\nhistorical source leads"]
+    Wikipedia["Wikipedia source pages\nlinked evidence"]
+    Commons["Wikimedia Commons CDN\nallowlisted demo audio/video"]
+    Qloo["Qloo Hackathon API\n/search, /v2/tags, /v2/insights"]
+    OpenRouter["OpenRouter chat completions\noptional composition and descriptions"]
+  end
+
+  History -->|"public GET, 7-second timeout"| WikimediaSearch
+  WikimediaSearch -.-> Wikipedia
+  Demo -->|"fixed public URLs"| Commons
+  QlooClient -->|"X-Api-Key, bounded retry/timeout"| Qloo
+  Model -->|"Bearer token, JSON-only prompt"| OpenRouter
+  Types -->|"JourneyResult JSON"| UI
+```
+
+### Component responsibilities
+
+| Layer | Implementation | Responsibility |
+| --- | --- | --- |
+| Presentation | `components/atlas-app.tsx`, `app/globals.css` | Collect input, switch sample/taste profiles, render evidence labels, sources, Qloo explanations, agent trace, and public media. |
+| HTTP boundary | `app/api/journey/route.ts` | Parse request JSON, invoke the agent, return `JourneyResult` with `Cache-Control: no-store`, and map invalid requests to HTTP 400. |
+| Health boundary | `app/api/health/route.ts` | Report service configuration without returning keys or credential fragments. |
+| Validation | `lib/input.ts` | Normalize lengths and whitespace, require place/period and 2–3 interests, reject surname-style identity prompts, and remove angle brackets. |
+| Orchestration | `lib/agent.ts` | Run the historical/demo and Qloo branches, apply deadlines, assemble the cultural route, and emit a visible tool trace. |
+| Historical retrieval | `lib/history.ts` | Search Wikimedia for up to four relevant pages and retain linked excerpts as evidence candidates. |
+| Model adapter | `lib/openrouter.ts` | Optionally compose claims from supplied excerpts and refine demo-media descriptions; it cannot change media URLs, creators, or licenses. |
+| Taste intelligence | `lib/qloo.ts` | Resolve typed entities/tags, reject weak or ambiguous matches, query four Insights categories concurrently, normalize explainability, retry bounded transient failures, and cache GET responses. |
+| Evidence control | `lib/evidence.ts` | Require HTTP sources, check year consistency and lexical overlap for historical claims, and reject malformed history or Qloo items. |
+| Curated samples | `lib/demo.ts` | Supply four fictional judge inputs, fixed historical packets, taste profiles, and allowlisted Wikimedia Commons media. |
+| Runtime/build | `vite.config.ts`, Vinext, Cloudflare plugin | Compile Next.js-compatible React server/client environments into a Cloudflare Worker for Sites or local Wrangler execution. |
+
+No database participates in the Jagantara request path. The `db/` and `examples/d1/` files are hosting-template scaffolding; the account-free MVP does not persist journey input or results. The only runtime cache is process-local and may disappear whenever the Worker instance is recycled.
+
+## Detailed data flow
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Visitor
+  participant UI as AtlasApp client
+  participant API as POST /api/journey
+  participant Input as Input validator
+  participant Agent as Heritage agent
+  participant Demo as Curated samples
+  participant Wiki as Wikimedia search
+  participant LLM as OpenRouter optional
+  participant Resolver as Qloo resolver
+  participant Qloo as Qloo API
+  participant Check as Claim checker
+
+  Visitor->>UI: Enter place, period, optional context/memory, and 2–3 interests
+  UI->>API: JSON JourneyInput
+  API->>Input: Parse and normalize untrusted input
+  alt Input is invalid
+    Input-->>API: Validation error
+    API-->>UI: HTTP 400 with safe message
+  else Input is valid
+    Input-->>Agent: Normalized JourneyInput
+    par Historical and narrative branch
+      alt Recognized demo place and demo flag
+        Agent->>Demo: Load fixed evidence packet and allowlisted media
+        Demo-->>Agent: Timeline, testimony, reconstruction, and media metadata
+        opt OpenRouter is configured
+          Agent->>LLM: Media IDs and fixed metadata only
+          LLM-->>Agent: Bounded replacement descriptions
+        end
+      else Custom journey
+        Agent->>Wiki: Search place + period, limit 4
+        Wiki-->>Agent: Titles, public URLs, and excerpts
+        opt OpenRouter is configured and sources exist
+          Agent->>LLM: Source packet plus attributed user context
+          LLM-->>Agent: JSON timeline with exact excerpts and labeled narrative
+          Agent->>Agent: Reject output whose excerpt is not contiguous in its source
+        end
+        opt Model is unavailable or returns no accepted claims
+          Agent->>Agent: Produce conservative linked research leads
+        end
+      end
+    and Taste branch under 22-second deadline
+      Agent->>Resolver: Send only the 2–3 public interest strings
+      loop For each interest, concurrently
+        Resolver->>Qloo: GET /search for named entities or /v2/tags for concepts
+        Qloo-->>Resolver: Candidate entities/tags
+        Resolver->>Resolver: Score name overlap, expected type, confidence, and runner-up margin
+      end
+      Resolver-->>Agent: Deduplicated verified IDs
+      par Four independent Insights categories
+        Agent->>Qloo: GET /v2/insights for music
+        Agent->>Qloo: GET /v2/insights for books
+        Agent->>Qloo: GET /v2/insights for film
+        Agent->>Qloo: GET /v2/insights for destinations
+      end
+      Qloo-->>Agent: Ranked results and available explainability
+      Agent->>Agent: Preserve successful categories if another category fails
+    end
+    Agent->>Check: Timeline claims and Qloo discoveries
+    Check->>Check: Verify source URL, exact support overlap, year consistency, and Qloo item identity
+    Check-->>Agent: Accepted and rejected sets
+    Agent->>Agent: Build ordered cultural route and append service/tool trace
+    Agent-->>API: JourneyResult
+    API-->>UI: HTTP 200, Cache-Control no-store
+    UI-->>Visitor: Sourced timeline, attributed narrative, route, media, explanations, and failures
+  end
+```
+
+### Data classification and trust rules
+
+| Data | Destination | Retention/handling |
+| --- | --- | --- |
+| Place and period | Jagantara Worker; Wikimedia; optional OpenRouter | Used to retrieve and compose historical context. Not written to a Jagantara database. |
+| Connection and memory | Jagantara Worker; optional OpenRouter | Kept attributed as testimony or reconstruction input. Never sent to Qloo. |
+| Cultural interests | Jagantara Worker; Qloo | Limited to three public-interest strings, resolved to verified Qloo IDs, and held only in the response/process cache context. |
+| Qloo API key | Qloo only, from the Worker | Server-side secret sent as `X-Api-Key`; never serialized to the browser. |
+| OpenRouter API key | OpenRouter only, from the Worker | Server-side Bearer token; never serialized to the browser. |
+| Historical evidence | Browser and optional OpenRouter | Includes the source title, URL, bounded excerpt, and entailment result so provenance remains inspectable. |
+| Demo media metadata | Browser and optional OpenRouter | URLs, creator, license, and attribution are fixed; only the short description may be refined. |
+
+### Output assembly and failure semantics
+
+The final `JourneyResult` contains the normalized input, location, accepted timeline, labeled narrative, Qloo discoveries, assembled cultural route, curated sample media when applicable, resolved taste signals, Qloo service state, agent trace, and generation timestamp.
+
+- A missing or failed model does not invent historical claims; custom journeys fall back to linked research leads, while curated sample copy remains intact.
+- Missing Qloo configuration leaves sourced history available but marks the cultural route unavailable.
+- Qloo requests retry only transient network, 5xx, and 429 responses. A category failure does not erase successful categories.
+- An empty, ambiguous, unauthorized, rate-limited, timed-out, or failed Qloo result is returned as an explicit service state; substitute recommendations are never fabricated.
+- Historical items that fail the evidence gate are removed before the response. The agent trace reports accepted and rejected counts.
+
+## Technology stack
+
+- Next.js 16, TypeScript, and React 19
+- Vinext and Vite 8 for the React server/client build
+- Cloudflare Workers, Wrangler, and Sites hosting
+- Qloo Hackathon API for typed taste intelligence and cross-domain recommendations
+- Wikimedia search and linked Wikipedia pages for historical evidence retrieval
+- Wikimedia Commons for curated, playable, freely licensed demo media
+- Optional OpenRouter chat completions using the configured model
+- Node test runner, Playwright, ESLint, and TypeScript for verification
 
 ## Local setup
 
@@ -94,7 +278,7 @@ The implementation follows the current public Qloo documentation and hackathon k
 - Taste signals: `signal.interests.entities` and `signal.interests.tags`
 - Explanation request: `feature.explainability=true`
 
-The client retries only transient network/5xx/429 responses, honors a bounded `Retry-After`, caps attempts at 6.5 seconds, isolates categories with `Promise.allSettled`, and enforces a 22-second end-to-end Qloo budget. No failure path substitutes recommendations.
+The client retries only transient network/5xx/429 responses, honors a bounded `Retry-After`, caps each attempt at 6.5 seconds, isolates categories with `Promise.allSettled`, and enforces a 22-second end-to-end Qloo budget. No failure path substitutes recommendations.
 
 The integration does not use legacy `/recs` or `/recommendations` endpoints. Only typed, scored, non-ambiguous Qloo entity or tag IDs are passed to Insights.
 

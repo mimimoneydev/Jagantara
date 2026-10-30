@@ -64,8 +64,6 @@ export type MediaItem = {
   creatorUrl?: string;
   licenseUrl?: string;
   attributionVerifiedAt?: string;
-  relatedQlooEntityId?: string;
-  relatedDiscoveryTitle?: string;
 };
 
 export type CulturalRoute = {

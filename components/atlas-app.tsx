@@ -162,8 +162,8 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
 
       <section className="media-section" id="media">
         <div className="media-heading">
-          <div><p className="section-kicker">03 / Qloo-linked public media</p><h2>Listen and watch the discoveries.</h2></div>
-          <p>Playable Internet Archive or Wikimedia Commons media is found dynamically from live Qloo recommendations. The model may describe a result, but Qloo supplies the discovery and the public archive supplies the URL, creator, and free license.</p>
+          <div><p className="section-kicker">03 / Sample media</p><h2>Listen and watch without leaving the journey.</h2></div>
+          <p>Free, publicly hosted media selected for the active sample. Descriptions may be refined by the model, while the allowlisted source, creator, and license stay fixed.</p>
         </div>
         {result.media.length ? <div className="media-grid">
           {result.media.map((item) => <article className="media-card" key={item.id}>
@@ -174,14 +174,13 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
             </div>
             <div className="media-copy">
               <span className="media-type">{item.mediaType === "audio" ? <Headphones size={13}/> : <Film size={13}/>} {item.mediaType}</span>
-              {item.relatedDiscoveryTitle && <span className="media-relation">Suggested from Qloo: {item.relatedDiscoveryTitle}</span>}
               <h3>{item.title}</h3>
               <p>{item.description}</p>
               <small>{item.creatorUrl ? <a href={item.creatorUrl} target="_blank" rel="noreferrer">{item.creator}</a> : item.creator} · {item.licenseUrl ? <a href={item.licenseUrl} target="_blank" rel="noreferrer">{item.license}</a> : item.license}{item.attributionVerifiedAt ? ` · verified ${item.attributionVerifiedAt}` : ""}</small>
               <a href={item.sourceUrl} target="_blank" rel="noreferrer">Source and license <ExternalLink size={12}/></a>
             </div>
           </article>)}
-        </div> : <p className="media-empty">No playable, freely licensed public media matched the current live Qloo discoveries.</p>}
+        </div> : <p className="media-empty">No allowlisted public media is attached to this custom journey.</p>}
       </section>
 
       <section className="evidence-section" id="evidence">
@@ -191,7 +190,7 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
 
       <section className="how" id="how"><div><p className="section-kicker">AI agent flow</p><h2>Every model, source, and decision stays visible.</h2></div><ol>{result.agentTrace.length ? result.agentTrace.map((step, index) => <li key={`${step.tool}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{step.tool.replaceAll("_", " ")}</strong><p>{step.detail}</p></div><i className={step.status}/></li>) : ["AI agent parses input", "Retrieve historical sources", "AI model composition", "Resolve Qloo entities and tags", "Query Qloo Insights", "AI model media description", "Check claims"].map((label, index) => <li key={label}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{label}</strong></div></li>)}</ol></section>
 
-      <footer><div className="brand"><span className="brand-mark"><Route size={17}/></span><span>JAGANTARA</span></div><p>Carry the story forward. Keep the labels attached.</p><span>Original hackathon MVP · 2026</span></footer>
+      <footer><div className="brand"><span className="brand-mark"><Route size={17}/></span><span>JAGANTARA</span></div><p>Carry the story forward. Keep the labels attached.</p><span>Jagantara @2026</span></footer>
 
       {selected && <div className="drawer-backdrop" onClick={() => setSelected(null)}><aside className="why-drawer" role="dialog" aria-modal="true" aria-label="Why this appeared" onClick={(e) => e.stopPropagation()}><button className="drawer-close" onClick={() => setSelected(null)} aria-label="Close">×</button><p className="section-kicker">Why this appeared</p><h2>{selected.title}</h2><EvidenceBadge type="QLOO_TASTE_CONNECTION"/><p>{selected.body}</p><h3>Qloo explanation</h3><ul>{selected.explanation.map((line) => <li key={line}>{line}</li>)}</ul><div className="drawer-caution"><Info size={16}/><p>This connection describes aggregate cultural affinity. It is not proof of your family’s history and not a prediction of your individual preferences.</p></div><code>entity_id: {selected.qlooEntityId}</code></aside></div>}
     </main>
