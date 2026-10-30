@@ -10,7 +10,7 @@ Jagantara is open-source software released under the [MIT License](./LICENSE), a
 
 The account-free judge journey offers four disclosed fictional samples: Native American history centered on Tahlequah and the Cherokee Nation, Irish and Italian immigration in New York, and African American history in Harlem. The samples do not claim ancestry, and every historical claim links to a retrievable source. Swapping the taste lens keeps a selected sample’s facts byte-for-byte stable while sending a different set of resolved Qloo entity IDs to Insights.
 
-Each sample also includes inline playable audio or video from Wikimedia Commons. Media URLs, creators, and free-license labels come from a fixed allowlist. When OpenRouter is available, it may refine the short descriptions using only that supplied metadata; it cannot add or replace player URLs.
+After Qloo returns live music and film discoveries, Jagantara searches Internet Archive and Wikimedia Commons dynamically using those discovery titles. Only relevant, playable files with a free license and creator metadata are accepted. OpenRouter may refine their descriptions, but it cannot select or replace the Qloo relationship, player URL, creator, or license.
 
 ## Why Qloo is indispensable
 

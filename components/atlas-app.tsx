@@ -162,8 +162,8 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
 
       <section className="media-section" id="media">
         <div className="media-heading">
-          <div><p className="section-kicker">03 / Sample media</p><h2>Listen and watch without leaving the journey.</h2></div>
-          <p>Free, publicly hosted media selected for the active sample. Descriptions may be refined by the model, while the allowlisted source, creator, and license stay fixed.</p>
+          <div><p className="section-kicker">03 / Qloo-linked public media</p><h2>Listen and watch the discoveries.</h2></div>
+          <p>Playable Internet Archive or Wikimedia Commons media is found dynamically from live Qloo recommendations. The model may describe a result, but Qloo supplies the discovery and the public archive supplies the URL, creator, and free license.</p>
         </div>
         {result.media.length ? <div className="media-grid">
           {result.media.map((item) => <article className="media-card" key={item.id}>
@@ -174,13 +174,14 @@ export function AtlasApp({ initialResult }: { initialResult: JourneyResult }) {
             </div>
             <div className="media-copy">
               <span className="media-type">{item.mediaType === "audio" ? <Headphones size={13}/> : <Film size={13}/>} {item.mediaType}</span>
+              {item.relatedDiscoveryTitle && <span className="media-relation">Suggested from Qloo: {item.relatedDiscoveryTitle}</span>}
               <h3>{item.title}</h3>
               <p>{item.description}</p>
               <small>{item.creatorUrl ? <a href={item.creatorUrl} target="_blank" rel="noreferrer">{item.creator}</a> : item.creator} · {item.licenseUrl ? <a href={item.licenseUrl} target="_blank" rel="noreferrer">{item.license}</a> : item.license}{item.attributionVerifiedAt ? ` · verified ${item.attributionVerifiedAt}` : ""}</small>
               <a href={item.sourceUrl} target="_blank" rel="noreferrer">Source and license <ExternalLink size={12}/></a>
             </div>
           </article>)}
-        </div> : <p className="media-empty">No allowlisted public media is attached to this custom journey.</p>}
+        </div> : <p className="media-empty">No playable, freely licensed public media matched the current live Qloo discoveries.</p>}
       </section>
 
       <section className="evidence-section" id="evidence">

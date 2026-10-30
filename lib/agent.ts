@@ -2,6 +2,7 @@ import { baseDemoResult, isDemoPlace } from "./demo";
 import { claimCheck } from "./evidence";
 import { composeWithOpenRouter, describeMediaWithOpenRouter } from "./openrouter";
 import { retrieveHistoricalSources, sourcesAsConservativeTimeline } from "./history";
+import { findPublicMediaForDiscoveries } from "./media";
 import { getQlooDiscoveries, QlooError, resolveQlooInterests } from "./qloo";
 import type { AgentTrace, JourneyInput, JourneyResult } from "./types";
 
@@ -13,11 +14,10 @@ export async function runHeritageAgent(input: JourneyInput): Promise<JourneyResu
     return { resolved, ...(await getQlooDiscoveries(resolved)) };
   })(), 22_000);
   let result: JourneyResult;
-  let mediaDescriptionPromise: ReturnType<typeof describeMediaWithOpenRouter> | undefined;
 
   if (input.demo && isDemoPlace(input.place)) {
     result = baseDemoResult(input);
-    mediaDescriptionPromise = describeMediaWithOpenRouter(input, result.media);
+    result.media = [];
     trace.push({ tool: "retrieve_historical_sources", status: "complete", detail: "Loaded the judge journey’s retrievable source packet." });
     trace.push({ tool: "compose_response", status: "complete", detail: "The Jagantara AI agent assembled the disclosed sample testimony and clearly marked reconstruction. Its fixed historical claims came from the curated source packet, not LLM generation." });
   } else {
@@ -58,10 +58,15 @@ export async function runHeritageAgent(input: JourneyInput): Promise<JourneyResu
     trace.push({ tool: "qloo_insights", status: "skipped", detail: "Skipped because entity resolution did not complete." });
   }
 
-  if (mediaDescriptionPromise) {
-    const describedMedia = await mediaDescriptionPromise;
+  const publicMedia = result.discoveries.length ? await findPublicMediaForDiscoveries(result.discoveries) : [];
+  result.media = publicMedia;
+  trace.push({ tool: "retrieve_qloo_linked_public_media", status: publicMedia.length ? "complete" : "skipped", detail: publicMedia.length
+    ? `Found ${publicMedia.length} playable, freely licensed public-archive ${publicMedia.length === 1 ? "file" : "files"} by searching live Qloo discovery titles; creator and license metadata were verified at the source.`
+    : "No playable, freely licensed public-archive file passed the relevance and attribution checks for the live Qloo discoveries; no unrelated media was substituted." });
+  if (publicMedia.length) {
+    const describedMedia = await describeMediaWithOpenRouter(input, publicMedia);
     if (describedMedia) result.media = describedMedia;
-    trace.push({ tool: "ai_model_media_description", status: describedMedia ? "complete" : "skipped", detail: describedMedia ? `AI use: The Jagantara AI agent used ${modelSource} for bounded descriptions of ${describedMedia.length} allowlisted media items. Wikimedia Commons URLs, creators, and licenses remained fixed.` : `AI use disclosed: The configured ${modelSource} was unavailable, so the curated media descriptions were used unchanged.` });
+    trace.push({ tool: "ai_model_media_description", status: describedMedia ? "complete" : "skipped", detail: describedMedia ? `AI use: The Jagantara AI agent used ${modelSource} for bounded descriptions of ${describedMedia.length} Qloo-linked media ${describedMedia.length === 1 ? "item" : "items"}. Public-archive URLs, Qloo relationships, creators, and licenses remained fixed.` : `AI use disclosed: The configured ${modelSource} was unavailable, so source descriptions were used unchanged.` });
   }
 
   const checkedTimeline = claimCheck(result.timeline);

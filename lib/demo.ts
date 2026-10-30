@@ -150,7 +150,7 @@ export function baseDemoResult(input: JourneyInput): JourneyResult {
       { id: `testimony:sample-${sample.location.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`, title: sample.memoryTitle, body: input.memory || "No family memory was supplied.", evidenceType: "FAMILY_TESTIMONY", sourceTitle: "User-provided memory (fictional sample, not a historical source)" },
       { ...sample.reconstruction, evidenceType: "CREATIVE_RECONSTRUCTION" },
     ],
-    discoveries: [], culturalRoute: null, media: sample.media, resolvedInterests: [],
+    discoveries: [], culturalRoute: null, media: [], resolvedInterests: [],
     qloo: { status: "unconfigured", message: "Qloo is not configured on this deployment. No recommendations have been substituted or invented." },
     agentTrace: [], generatedAt: new Date().toISOString(),
   };
