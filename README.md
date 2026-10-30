@@ -32,7 +32,7 @@
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vite.dev/)
 
 <p align="center">
-  <img src="./assets/jagantara-logo-3x2.png" alt="Jagantara">
+  <img src="./assets/jagantara-logo-3x2.png"  width="200" alt="Jagantara">
 </p>
 
 </div>
