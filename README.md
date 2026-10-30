@@ -31,6 +31,10 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vite.dev/)
 
+<p align="center">
+  <img src="./assets/jagantara-logo-3x2.png" alt="Jagantara">
+</p>
+
 </div>
 
 ## About
