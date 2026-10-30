@@ -246,8 +246,14 @@ test("Qloo ignores search results without an entity ID", async () => {
 });
 
 test("taste swap keeps history stable while changing Qloo signals and discoveries", async () => {
+  process.env.LLM_PROVIDER = "openrouter";
+  process.env.LLM_MODEL = "deepseek/deepseek-v4.1-flash";
+  process.env.OPENROUTER_API_KEY = "test-openrouter-key";
   globalThis.fetch = async (input) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+    if (url.hostname === "openrouter.ai") {
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ descriptions: [{ id: "media:cherokee-sovereignty", description: "Bounded AI description." }] }) } }] });
+    }
     if (url.pathname === "/search") {
       const name = url.searchParams.get("query") || "unknown";
       return Response.json({ results: [{ entity_id: `id-${name.replaceAll(" ", "-")}`, name, subtype: "urn:entity:artist" }] });
@@ -268,4 +274,8 @@ test("taste swap keeps history stable while changing Qloo signals and discoverie
   assert.notDeepEqual(rhythm.discoveries.map((item) => item.qlooEntityId), page.discoveries.map((item) => item.qlooEntityId));
   assert.equal(rhythm.qloo.status, "live");
   assert.equal(page.qloo.status, "live");
+  assert.equal(rhythm.agentTrace[0]?.tool, "ai_agent_parse_input");
+  assert.match(rhythm.agentTrace[0]?.detail || "", /Jagantara AI agent/);
+  const aiUse = rhythm.agentTrace.find((step) => step.tool === "ai_model_media_description");
+  assert.match(aiUse?.detail || "", /DeepSeek V4\.1 Flash.*OpenRouter/);
 });
